@@ -4,6 +4,7 @@ from discord.ext import commands
 from discord import app_commands
 from dotenv import load_dotenv
 import _35MonsUU as _35UU
+import lockout as lcko
 
 
 # --- CONFIGURATION ---
@@ -25,15 +26,29 @@ async def on_ready():
     except Exception as e:
         print(f"Error syncing: {e}")
 
-# --- COMMANDES ---
+# --- COMMANDS ---
 
 @bot.tree.command(name="hello", description="Say hello")
 async def hello_slash(interaction: discord.Interaction):
     await interaction.response.send_message(f"Hello I'm {bot.user.name}")
 
+
+@bot.tree.command(name="send", description="Envoie l'embed avec les boutons")
+async def send(interaction: discord.Interaction):
+    embed, view = lcko.create_embed_and_view()
+    # On répond directement à l'interaction de la commande slash
+    await interaction.response.send_message(embed=embed, view=view)
+
+# ---Test commands---
+
 @bot.tree.command(name="test", description="Send test embed")
-async def hello_slash(interaction: discord.Interaction):
+async def test_slash(interaction: discord.Interaction):
     await interaction.response.send_message(embed=_35UU.test())
+
+@bot.tree.command(name="test_lockout", description="Lancer une partie de test solo")
+async def test_lockout(interaction: discord.Interaction):
+    # Lance directement le jeu avec toi et le bot
+    await lcko.game(interaction.user, interaction.client.user, interaction)
 
 # --- LAUNCH ---
 load_dotenv()
