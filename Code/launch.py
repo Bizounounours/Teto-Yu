@@ -41,6 +41,7 @@ async def send(interaction: discord.Interaction):
 
 # ---Test commands---
 
+'''
 @bot.tree.command(name="test", description="Send test embed")
 async def test_slash(interaction: discord.Interaction):
     await interaction.response.send_message(embed=_35UU.test())
@@ -49,6 +50,8 @@ async def test_slash(interaction: discord.Interaction):
 async def test_lockout(interaction: discord.Interaction):
     # Lance directement le jeu avec toi et le bot
     await lcko.game(interaction.user, interaction.client.user, interaction)
+'''
+
 
 # --- LAUNCH ---
 load_dotenv()
