@@ -4,7 +4,7 @@ from discord import app_commands
 import random 
 import graphic as gr
 
-# Ordered list of all 35 Pokemon for the grid
+# Default ordered list of 35 Pokemon for the grid
 ALL_POKEMON = [
     "Shiinotic", "Scolipede", "Clodsire", "Aggron", "Tropius", "Vigoroth", "Aerodactyl",
     "Puppitar", "Lokix", "Flapple", "Garganacl", "Unfezant", "Tyranitar", "Leafeon",
@@ -48,13 +48,15 @@ class PokemonSelect(discord.ui.Select):
         await interaction.edit_original_response(embed=embed_g, view=game_view, attachments=[file])
 
 
-# Main interactive game view handling turns and 5 row select menus
+# Main interactive game view handling turns, dynamic lists, and 5 row select menus
 class LockoutGameView(discord.ui.View):
-    def __init__(self, fp: discord.Member, sp: discord.Member):
+    def __init__(self, fp: discord.Member, sp: discord.Member, custom_list: list = None):
         super().__init__(timeout=None)
         self.players = [fp, sp]
         self.current_turn = 0
         self.teams = {fp: [], sp: []}
+        # Use provided custom list or fall back to ALL_POKEMON default list
+        self.pokemon_list = custom_list if custom_list else ALL_POKEMON
         self.update_selects()
 
     def update_selects(self):
@@ -62,9 +64,9 @@ class LockoutGameView(discord.ui.View):
         picked = self.teams[self.players[0]] + self.teams[self.players[1]]
         row_letters = ["A", "B", "C", "D", "E"]
 
-        # Generate one select menu per row (5 rows of 7 Pokemon)
+        # Generate one select menu per row (5 rows of 7 Pokemon each)
         for i in range(5):
-            row_pokemon = ALL_POKEMON[i * 7 : (i + 1) * 7]
+            row_pokemon = self.pokemon_list[i * 7 : (i + 1) * 7]
             available_in_row = [p for p in row_pokemon if p not in picked]
 
             # Add select menu only if there are remaining Pokemon in this row
@@ -77,9 +79,9 @@ class LockoutGameView(discord.ui.View):
                 ))
 
     async def create_game_embed_and_file(self):
-        # Generate grid image buffer using graphic module
+        # Generate grid image buffer using graphic module with active pokemon list
         buffer = await gr.generate_lockout_grid(
-            ALL_POKEMON, 
+            self.pokemon_list, 
             self.teams[self.players[0]], 
             self.teams[self.players[1]]
         )
@@ -99,46 +101,65 @@ class LockoutGameView(discord.ui.View):
         return embed_g, file
 
     async def finish_game(self, interaction: discord.Interaction):
+        # Disable all row select dropdowns
         for item in self.children:
             item.disabled = True
 
-        buffer = await gr.generate_lockout_grid(
-            ALL_POKEMON, 
-            self.teams[self.players[0]], 
-            self.teams[self.players[1]]
+        p1 = self.players[0]
+        p2 = self.players[1]
+
+        # Generate team summary image
+        buffer = await gr.generate_teams_summary(
+            self.teams[p1], 
+            self.teams[p2],
+            p1.display_name,
+            p2.display_name
         )
-        file = discord.File(fp=buffer, filename="grid.png")
+        file = discord.File(fp=buffer, filename="teams_summary.png")
+
+        # Format team listings in text
+        red_team_str = "\n".join([f"• {p}" for p in self.teams[p1]])
+        green_team_str = "\n".join([f"• {p}" for p in self.teams[p2]])
 
         embed_g = discord.Embed(
-            title="35 Lockout — Draft Finished!",
-            description="Both teams are complete!",
+            title="35 Lockout — Final Teams",
+            description="Draft complete! Here are the selected teams for both players:",
             color=discord.Color.gold()
         )
-        embed_g.set_image(url="attachment://grid.png")
+        embed_g.add_field(name=f"🟥 {p1.display_name}'s Team", value=red_team_str, inline=True)
+        embed_g.add_field(name=f"🟩 {p2.display_name}'s Team", value=green_team_str, inline=True)
+        embed_g.set_image(url="attachment://teams_summary.png")
+
         await interaction.edit_original_response(embed=embed_g, view=self, attachments=[file])
 
 
-# Function to initialize the match embed
-async def game(fp, sp, interaction):
-    game_view = LockoutGameView(fp, sp)
+# Function to initialize the match embed (handles slash command deferral safely)
+async def game(fp, sp, interaction: discord.Interaction, pokemon_list: list = None):
+    game_view = LockoutGameView(fp, sp, pokemon_list)
     embed_g, file = await game_view.create_game_embed_and_file()
-    await interaction.channel.send(embed=embed_g, view=game_view, file=file)
+
+    # Send message using followup if response was deferred, otherwise standard send
+    if interaction.response.is_done():
+        await interaction.followup.send(embed=embed_g, view=game_view, file=file)
+    else:
+        await interaction.channel.send(embed=embed_g, view=game_view, file=file)
 
 
 # Waiting room view for players to join
 class MyView(discord.ui.View):
-    def __init__(self):
+    def __init__(self, pokemon_list: list = None):
         super().__init__(timeout=None) 
         self.Players_In = []  # should contain max 2 players
+        self.pokemon_list = pokemon_list  # Store validated custom list
 
     @discord.ui.button(label="Join", style=discord.ButtonStyle.primary, custom_id="mon_bouton_action")
     async def button_callback(self, interaction: discord.Interaction, button: discord.ui.Button):
         user = interaction.user
         
-        # Check to avoid same player joining twice
-        if user in self.Players_In:
-            await interaction.response.send_message("You already joined!", ephemeral=True)
-            return
+        # # Check to avoid same player joining twice
+        # if user in self.Players_In:
+        #     await interaction.response.send_message("You already joined!", ephemeral=True)
+        #     return
 
         # Add players to verification list
         self.Players_In.append(user)
@@ -167,16 +188,17 @@ class MyView(discord.ui.View):
             if sec_p == first_p:
                 sec_p = self.Players_In[1]
             
-            # Start the game with image grid
-            await game(first_p, sec_p, interaction)
+            # Start game with custom verified list (or default list if None)
+            await game(first_p, sec_p, interaction, self.pokemon_list)
 
 
-def create_embed_and_view():
+def create_embed_and_view(pokemon_list: list = None):
     embed = discord.Embed(
         title="35 Lockout waiting room", 
         description="Click on join to join",
         color=discord.Color.blue()
     )
     
-    view = MyView()
+    # Pass verified list to MyView instance
+    view = MyView(pokemon_list=pokemon_list)
     return embed, view
